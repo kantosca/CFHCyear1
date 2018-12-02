@@ -26,106 +26,114 @@ library(RColorBrewer)
 library(GUniFrac)
 library(pheatmap)
 library(prettyPCoA)
+library(ggsignif)
+library(DECIPHER)
 ```
 
 
-```{r dada2, echo = FALSE}
-#Get list of fastq files
-path <- "~//Google Drive/Kathys Schoolwork/Dartmouth/CFHCyear1/samples"
-list.files(path)
-fnFs <- sort(list.files(path,pattern = "_R1.fastq.gz", full.names = TRUE))
-fnRs <- sort(list.files(path,pattern = "_R2.fastq.gz", full.names = TRUE))
-
-#extract sample names
-sample.names <- sapply(strsplit(basename(fnFs), "_R"),'[',1)
-
-#quality Filtering and trimming performed by Erika Dade #
-#visualize quality profile
-#plotQualityProfile(fnFs[1:2])
-#plotQualityProfile(fnRs[1:2])
-
-# Place filtered files in filtered/ subdirectory
-#filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
-#filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
-
-#filter with standard parameters except trunQ = 5 for consistency across studies ***
-#out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(240,170),
- #             maxN=0, maxEE=c(2,2), truncQ=5, rm.phix=TRUE,
-  #            compress=TRUE, multithread=TRUE) # On Windows set multithread=FALSE
-#head(out)
-
-#learn error rates 
-#changed from filtFs and filtRs for this run instance for all subsequent 
-#instances because Erika ran previous steps
-errF <- learnErrors(fnFs, multithread=TRUE)
-errR <- learnErrors(fnRs, multithread=TRUE)
-plotErrors(errF, nominalQ = TRUE)
-
-#dereplication
-derepFs <- derepFastq(fnFs, verbose=TRUE)
-derepRs <- derepFastq(fnRs, verbose=TRUE)
-# Name the derep-class objects by the sample names
-names(derepFs) <- sample.names
-names(derepRs) <- sample.names
-
-#sample inference
-#note: dada(...,pool = "pseudo")performs pseudo-pooling, in which samples are processed 
-#independently after sharing information between samples, approximating pooled 
-#sample inference in linear time.
-dadaFs <- dada(derepFs, err=errF, multithread=TRUE)
-dadaRs <- dada(derepRs, err=errR, multithread=TRUE)
-#inspect returned dada-class object
-dadaFs[[1]]
-
-#merge paired reads
-mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE)
-# Inspect the merger data.frame from the first sample
-head(mergers[[1]])
-
-#remove the deredFs and Rs(118.3Gb) to create space in the R environment
-rm(derepFs)
-rm(derepRs)
-
-```
-
-
-```{r dada2ASVandTaxa, echo = FALSE}
-#construct sequence table
-seqtab <- makeSequenceTable(mergers)
-dim(seqtab)
-# Inspect distribution of sequence lengths
-table(nchar(getSequences(seqtab)))
-
-#remove chimeras
-seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
-dim(seqtab.nochim)
-#percent non-chimeras
-sum(seqtab.nochim)/sum(seqtab)
-
-#Track reads to make sure no step seems faulty
-getN <- function(x) sum(getUniques(x))
-track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
-colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
-rownames(track) <- sample.names
-head(track)
-
-#assign taxonomy
-
-taxa <- assignTaxonomy(seqtab.nochim, "~/taxa/silva_nr_v132_train_set.fa", multithread=TRUE)
-taxa <- addSpecies(taxa, "~/taxa/silva_species_assignment_v132.fa")
-#check taxa assignments
-taxa.print <- taxa # Removing sequence rownames for display only
-rownames(taxa.print) <- NULL
-head(taxa.print)
-
-```
 
 
 ```{r alpha, echo = FALSE}
+#read in sample data
+sampdf <- read.csv("ClinData.csv")
+rownames(sampdf) <- sampdf$mblid
+
+#Remove CF samples after the 1 year time point
+year1seqtab <- seqtab.nochim[which(rownames(seqtab.nochim) %in% rownames(sampdf)),]
+
+
+#Check row order
+sampdf <- sampdf[match(rownames(year1seqtab), sampdf$mblid),]
+rownames(sampdf) == rownames(year1seqtab)
+
+#convert to phyloseq object
+
+phylo <- phyloseq(otu_table(year1seqtab, taxa_are_rows=FALSE), 
+               sample_data(sampdf), 
+               tax_table(taxa)) 
+
+plot_richness(phylo, x = "TimePeriod", measures = "Shannon", color = "Status")
+
+alphadiv <- estimate_richness(phylo)
+#extract shannon diversity and add it to sampdf
+Shannon <- alphadiv$Shannon
+Simpson <- alphadiv$Simpson
+sampdf <- cbind(sampdf, Shannon, Simpson)
+#Set order for plotting by age and Status
+sampdf$TimePeriod <- factor(sampdf$TimePeriod, levels = c("6W","4M","6M","9M","12M"))
+sampdf$Status <- factor(sampdf$Status, levels = c("HC","CF"))
+Greens <- brewer.pal(5,"Greens")
+Blues <- brewer.pal(5,"Blues")
+GreenBlues <- as.vector(rbind(Greens, Blues))
+
+```  
+
+```{r HCalphaplot, echo = FALSE}
+HCalphaplot <- ggplot(data = sampdf[sampdf$Status=="HC",], aes(x = TimePeriod, y = Shannon, 
+                                                               group = TimePeriod)) + 
+  geom_boxplot(fill = Greens, color = "darkgreen") + 
+  geom_signif(comparisons = list(c("6W", "12M")), map_signif_level=TRUE) +
+  theme_bw(base_size = 25) +
+  xlab("Age in Months") +
+  scale_x_discrete(labels = c("1M","4M","6M","9M","12M"))
+HCalphaplot
+pdf(file = "ShannonHC.pdf",height = 8, width = 12)
+  HCalphaplot
+dev.off()
+```
+```{r CFalphaplot, echo = FALSE}
+CFalphaplot <- ggplot(data = sampdf[sampdf$Status=="CF",], aes(x = TimePeriod, y = Shannon, group = TimePeriod)) + geom_boxplot(fill = Blues, color = "mediumblue") +
+  geom_signif(comparisons = list(c("6W", "12M")), map_signif_level=TRUE) +
+  theme_bw(base_size = 25) +
+  xlab("Age in Months") +
+  scale_x_discrete(labels = c("1M","4M","6M","9M","12M"))
+CFalphaplot
+pdf(file = "ShannonCF.pdf",height = 8, width = 12)
+  CFalphaplot
+dev.off()
+```
+
+```{r alphaplot, echo = FALSE}
+alphaplot <- ggplot(data = sampdf, aes(x = TimePeriod, y = Shannon, color = Status)) + 
+  geom_boxplot(fill = GreenBlues) +
+  scale_color_manual(values = c("darkgreen", "mediumblue"), 
+                     labels = c("General Population", "Cystic Fibrosis"))+
+  theme_bw(base_size = 25) +
+  xlab("Age in Months") +
+  scale_x_discrete(labels = c("1M","4M","6M","9M","12M"))
+alphaplot
+pdf(file = "ShannonAll.pdf",height = 8, width = 14)
+  alphaplot
+dev.off()
+  
 
 ```
 
 
+```{r phylotree, echo = FALSE}
+#multiple alignments with DECIPHER then create the tree with phangorn
+seqs <- getSequences(year1seqtab)
+# This propagates to the tip labels of the tree
+names(seqs) <- seqs 
+alignment <- AlignSeqs(DNAStringSet(seqs), anchor=NA,verbose=FALSE)
+
+#From https://bioconductor.org/help/course-materials/2017/BioC2017/Day1/Workshops/Microbiome/MicrobiomeWorkflowII.html The phangorn R package is then used to construct a phylogenetic tree. Here we first construct a neighbor-joining tree, and then fit a GTR+G+I (Generalized time-reversible with Gamma rate variation) maximum likelihood tree using the neighbor-joining tree as a starting point.
+
+phangAlign <- phyDat(as(alignment, "matrix"), type="DNA")
+dm <- dist.ml(phangAlign)
+treeNJ <- NJ(dm) # Note, tip order != sequence order
+fit = pml(treeNJ, data=phangAlign)
+fitGTR <- update(fit, k=4, inv=0.2)
+fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
+        rearrangement = "stochastic", control = pml.control(trace = 0))
+
+```
+
+
+```{r beta, echo = FALSE}
+
+
+```
 
 
 
