@@ -28,6 +28,8 @@ library(pheatmap)
 library(prettyPCoA)
 library(ggsignif)
 library(DECIPHER)
+library(pheatmap)
+library(scatterplot3d)
 ```
 
 
@@ -52,7 +54,7 @@ phylo <- phyloseq(otu_table(year1seqtab, taxa_are_rows=FALSE),
                sample_data(sampdf), 
                tax_table(taxa)) 
 
-plot_richness(phylo, x = "TimePeriod", measures = "Shannon", color = "Status")
+
 
 alphadiv <- estimate_richness(phylo)
 #extract shannon diversity and add it to sampdf
@@ -111,7 +113,7 @@ dev.off()
 
 
 ```{r phylotree, echo = FALSE}
-#multiple alignments with DECIPHER then create the tree with phangorn
+#multiple alignments with DECIPHER then create the tree with phangorn RaxML via the ips package within R
 seqs <- getSequences(year1seqtab)
 # This propagates to the tip labels of the tree
 names(seqs) <- seqs 
@@ -127,17 +129,85 @@ fitGTR <- update(fit, k=4, inv=0.2)
 fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
         rearrangement = "stochastic", control = pml.control(trace = 0))
 
+
 ```
+
 
 
 ```{r beta, echo = FALSE}
+#extracting ASV table
+ASV <- as.data.frame(phylo@otu_table@.Data)
+#extract tree
+tree <- fitGTR$tree
+tree <- midpoint(tree)
+#calculate GUnifracDistances
+unifracs <- GUniFrac(ASV, tree, alpha = c(0, 0.5, 1))$unifracs
+#extract distance 0.5
+d5 <- unifracs[,,"d_0.5"]
+#PERMANOVA
+adonis(as.dist(d5) ~ sampdf$Status)
+
+#ordination for plotting
+pcs <- pcoa(d5, correction = "cailliez")
+
+
+rownames(sampdf) == rownames(pcs$vectors)
+#modify  sample data for plotting
+sampdf <- cbind(sampdf, pcs$vectors[,1:3])
+
+sampdf$StatusAge <- paste(sampdf$TimePeriod,sampdf$Status)
+sampdf$StatusAge <- factor(sampdf$StatusAge, 
+                           levels = c("6W CF", "6W HC","4M CF", 
+                                      "4M HC","6M CF", "6M HC", 
+                                      "9M CF","9M HC", "12M CF","12M HC"))
+
+pdf(file = "betaAll.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$TimePeriod != "6W",], aes(Axis.1,Axis.2, color = StatusAge)) + 
+  geom_point(size = 2) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = GreenBlues[3:10], name = "Age Status")
+dev.off()
+
+```
+
+
+```{r feeding beta, echo = FALSE}
+
+pdf(file = "betaAll.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$TimePeriod != "6W",], aes(Axis.1,Axis.2, color = StatusAge)) + 
+  geom_point(size = 2) +
+  scale_shape_manual(values = sampdf$dFeedingModeED, name = "Feeding Mode", labels = c("Breast", "Formula", "Mixed"))+
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = GreenBlues[3:10], name = "Age Status")
+dev.off()
+
+```
+```{r heatmap, echo = FALSE}
+
+#Prepping ASV table for heatmap
+
+
+
+
+pdf("heatmap.pdf")
+heatmap
+dev.off()
 
 
 ```
 
 
 
+```{r taxa, echo = FALSE}
 
+multcomtaxa <- mt(phylo, "Status")
+multcomtaxa$adjp
+multcomtaxa$Genus[1:25]
+
+
+```
 
 
 
