@@ -30,6 +30,10 @@ library(ggsignif)
 library(DECIPHER)
 library(pheatmap)
 library(scatterplot3d)
+library(Rtsne)
+library(gganimate)
+library(gifski)
+library(png)
 ```
 
 
@@ -64,32 +68,63 @@ sampdf <- cbind(sampdf, Shannon, Simpson)
 #Set order for plotting by age and Status
 sampdf$TimePeriod <- factor(sampdf$TimePeriod, levels = c("6W","4M","6M","9M","12M"))
 sampdf$Status <- factor(sampdf$Status, levels = c("HC","CF"))
-Greens <- brewer.pal(5,"Greens")
-Blues <- brewer.pal(5,"Blues")
+#Color palettes
+Greens <- c("darkolivegreen1","chartreuse","springgreen3","chartreuse4","#003300")
+  #c("#00FF00","#74C476","#33CC33","#006600","#003300")
+Blues <- c("#00FFFF","#00CCFF","#3366FF","#0000FF","#000088")
+Pinks <- c("#FF99FF","#FF66CC","#FF3399","violetred","deeppink4")
+Purples <- c("#CC99FF","mediumpurple2","mediumorchid","mediumorchid4","#660099")
+Reds <- c("#FF3333","firebrick2","#CC0033","#990000","indianred4")
+Oranges <- c("#FFFF00","#FFCC00","#FF9900","#FF6600","darkorange4")
 GreenBlues <- as.vector(rbind(Greens, Blues))
+brewer.pal(5,"Greens")
+
+plot(1:30,1:30,col = Rainbow,pch = 19,cex = 2)
+Rainbow <- as.vector(cbind(Pinks[1:4], Reds[2:4], Oranges[1:4], Greens[1:4], Blues[1:4], Purples[1:4]))
+Rainbow2 <- as.vector(cbind(Blues[1:4], Greens[1:4], Oranges[1:4], Pinks[1:4], Purples[1:4]))
+
+wilcox.test(sampdf$Shannon[sampdf$TimePeriod == "6W"]~sampdf$Status[sampdf$TimePeriod == "6W"])
+wilcox.test(sampdf$Shannon[sampdf$TimePeriod == "4M"]~sampdf$Status[sampdf$TimePeriod == "4M"])
+wilcox.test(sampdf$Shannon[sampdf$TimePeriod == "6M"]~sampdf$Status[sampdf$TimePeriod == "6M"])
+wilcox.test(sampdf$Shannon[sampdf$TimePeriod == "9M"]~sampdf$Status[sampdf$TimePeriod == "9M"])
+wilcox.test(sampdf$Shannon[sampdf$TimePeriod == "12M"]~sampdf$Status[sampdf$TimePeriod == "12M"])
 
 ```  
 
 ```{r HCalphaplot, echo = FALSE}
 HCalphaplot <- ggplot(data = sampdf[sampdf$Status=="HC",], aes(x = TimePeriod, y = Shannon, 
                                                                group = TimePeriod)) + 
-  geom_boxplot(fill = Greens, color = "darkgreen") + 
+  geom_boxplot(fill = Greens, color = "black") + 
   geom_signif(comparisons = list(c("6W", "12M")), map_signif_level=TRUE) +
   theme_bw(base_size = 25) +
   xlab("Age in Months") +
   scale_x_discrete(labels = c("1M","4M","6M","9M","12M"))
 HCalphaplot
-pdf(file = "ShannonHC.pdf",height = 8, width = 12)
+pdf(file = "ShannonHC2.pdf",height = 8, width = 12)
   HCalphaplot
 dev.off()
 ```
 ```{r CFalphaplot, echo = FALSE}
-CFalphaplot <- ggplot(data = sampdf[sampdf$Status=="CF",], aes(x = TimePeriod, y = Shannon, group = TimePeriod)) + geom_boxplot(fill = Blues, color = "mediumblue") +
+CFalphaplot <- ggplot(data = sampdf[sampdf$Status=="CF",], aes(x = TimePeriod, y = Shannon, group = TimePeriod)) + geom_boxplot(fill = Blues, color = "black") +
   geom_signif(comparisons = list(c("6W", "12M")), map_signif_level=TRUE) +
   theme_bw(base_size = 25) +
   xlab("Age in Months") +
   scale_x_discrete(labels = c("1M","4M","6M","9M","12M"))
 CFalphaplot
+pdf(file = "ShannonCF2.pdf",height = 8, width = 12)
+  CFalphaplot
+dev.off()
+```
+
+```{r CFalphaPulmEx, echo = FALSE}
+CFalphaB4PulmEx <- ggplot(data = sampdf[sampdf$Status=="CF",], aes(x = B4PulmEx, y = Shannon)) + geom_boxplot(fill = c(Blues[3],Blues[5]), color = "black") +
+  geom_signif(comparisons = list(c( "no","yes")), map_signif_level=TRUE) +
+  theme_bw(base_size = 25) +
+  xlab("Before first exacerbation") +
+  scale_x_discrete(labels = c("no","yes"))
+CFalphaB4PulmEx
+
+wilcox.test(sampdf$Shannon[sampdf$Status=="CF"]~sampdf$B4PulmEx[sampdf$Status=="CF"])
 pdf(file = "ShannonCF.pdf",height = 8, width = 12)
   CFalphaplot
 dev.off()
@@ -104,7 +139,7 @@ alphaplot <- ggplot(data = sampdf, aes(x = TimePeriod, y = Shannon, color = Stat
   xlab("Age in Months") +
   scale_x_discrete(labels = c("1M","4M","6M","9M","12M"))
 alphaplot
-pdf(file = "ShannonAll.pdf",height = 8, width = 14)
+pdf(file = "ShannonAll2.pdf",height = 8, width = 14)
   alphaplot
 dev.off()
   
@@ -137,15 +172,55 @@ fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
 ```{r beta, echo = FALSE}
 #extracting ASV table
 ASV <- as.data.frame(phylo@otu_table@.Data)
+#check that ASV matched samples dataframe
+rownames(ASV) == rownames(sampdf)
+CFASV <- ASV[sampdf$Status=="CF",]
+CFsamp <- sampdf[sampdf$Status == "CF",]
 #extract tree
 tree <- fitGTR$tree
 tree <- midpoint(tree)
+
 #calculate GUnifracDistances
 unifracs <- GUniFrac(ASV, tree, alpha = c(0, 0.5, 1))$unifracs
 #extract distance 0.5
 d5 <- unifracs[,,"d_0.5"]
+d1<- unifracs[,,"d_1"]
 #PERMANOVA
-adonis(as.dist(d5) ~ sampdf$Status)
+adonis(as.dist(d1) ~ sampdf$TimePeriod + sampdf$Status + sampdf$dFeedingModeED)
+adonis(as.dist(d5[sampdf$TimePeriod == "6W",sampdf$TimePeriod == "6W"]) ~ sampdf$Status[sampdf$TimePeriod == "6W"])
+adonis(as.dist(d5[sampdf$TimePeriod == "4M",sampdf$TimePeriod == "4M"]) ~ sampdf$Status[sampdf$TimePeriod == "4M"])
+adonis(as.dist(d5[sampdf$TimePeriod == "6M",sampdf$TimePeriod == "6M"]) ~ sampdf$Status[sampdf$TimePeriod == "6M"])
+adonis(as.dist(d5[sampdf$TimePeriod == "9M",sampdf$TimePeriod == "9M"]) ~ sampdf$Status[sampdf$TimePeriod == "9M"])
+adonis(as.dist(d5[sampdf$TimePeriod == "12M",sampdf$TimePeriod == "12M"]) ~ sampdf$Status[sampdf$TimePeriod == "12M"])
+adonis(as.dist(d5[sampdf$Status == "HC",sampdf$Status == "HC"]) ~ sampdf$dFeedingModeED[sampdf$Status == "HC"])
+#running again for CF samples
+CFunifracs <- GUniFrac(CFASV, tree, alpha = c(0, 0.5, 1))$unifracs
+#extract distance 0.5
+CFd5 <- CFunifracs[,,"d_0.5"]
+CFd1 <- CFunifracs[,,"d_1"]
+#PERMANOVA
+adonis(as.dist(CFd5) ~ CFsamp$B4PulmEx)
+adonis(as.dist(CFd5) ~ CFsamp$PulmEx1yr)
+adonis(as.dist(CFd5) ~ CFsamp$PancIns)
+adonis(as.dist(CFd5) ~ CFsamp$dFeedingModeED)
+adonis(as.dist(CFd5) ~ CFsamp$TimePeriod)
+adonis(as.dist(CFd5) ~ CFsamp$DeliveryMode)
+adonis(as.dist(CFd5) ~ CFsamp$Sex)
+adonis(as.dist(CFd5) ~ CFsamp$TimePeriod + CFsamp$PulmEx1yr)
+adonis(as.dist(CFd5) ~ CFsamp$TimePeriod + CFsamp$B4PulmEx)
+adonis(as.dist(CFd5[CFsamp$TimePeriod == "6W" ,CFsamp$TimePeriod == "6W"]) ~ CFsamp$PulmEx1yr[CFsamp$TimePeriod == "6W"])
+adonis(as.dist(CFd5[CFsamp$TimePeriod == "4M" ,CFsamp$TimePeriod == "4M"]) ~ CFsamp$PulmEx1yr[CFsamp$TimePeriod == "4M"])
+adonis(as.dist(CFd5[CFsamp$TimePeriod == "6M" ,CFsamp$TimePeriod == "6M"]) ~ CFsamp$PulmEx1yr[CFsamp$TimePeriod == "6M"])
+adonis(as.dist(CFd5[CFsamp$TimePeriod == "9M" ,CFsamp$TimePeriod == "9M"]) ~ CFsamp$PulmEx1yr[CFsamp$TimePeriod == "9M"])
+adonis(as.dist(CFd5[CFsamp$TimePeriod == "12M" ,CFsamp$TimePeriod == "12M"]) ~ CFsamp$PulmEx1yr[CFsamp$TimePeriod == "12M"])
+
+adonis(as.dist(d5[sampdf$PancIns != "yes",sampdf$PancIns != "yes"]) ~ sampdf$Status[sampdf$PancIns != "yes"])
+
+
+CFpcs <- pcoa(CFd5, correction = "cailliez")
+CFpc1_2 <- CFpcs$vectors[,1:2]
+colnames(CFpc1_2) <- c("PC1","PC2")
+CFsamp <- cbind(CFsamp,CFpc1_2)
 
 #ordination for plotting
 pcs <- pcoa(d5, correction = "cailliez")
@@ -157,16 +232,15 @@ sampdf <- cbind(sampdf, pcs$vectors[,1:3])
 
 sampdf$StatusAge <- paste(sampdf$TimePeriod,sampdf$Status)
 sampdf$StatusAge <- factor(sampdf$StatusAge, 
-                           levels = c("6W CF", "6W HC","4M CF", 
-                                      "4M HC","6M CF", "6M HC", 
-                                      "9M CF","9M HC", "12M CF","12M HC"))
+                           levels = c("6W HC","6W CF", "4M HC","4M CF", "6M HC", "6M CF",
+                                      "9M HC","9M CF", "12M HC","12M CF"))
 
-pdf(file = "betaAll.pdf", height = 8, width = 12)
+pdf(file = "betaAll2.pdf", height = 8, width = 12)
 ggplot(sampdf[sampdf$TimePeriod != "6W",], aes(Axis.1,Axis.2, color = StatusAge)) + 
-  geom_point(size = 2) +
+  geom_point(size = 4) +
    labs(x = "PC 1", y = "PC 2")+
   theme_bw(base_size = 25) +
-  scale_color_manual(values = GreenBlues[3:10], name = "Age Status")
+  scale_color_manual(values = c(GreenBlues[3:10]), name = "Age Status")
 dev.off()
 
 ```
@@ -174,22 +248,370 @@ dev.off()
 
 ```{r feeding beta, echo = FALSE}
 
-pdf(file = "betaAll.pdf", height = 8, width = 12)
-ggplot(sampdf[sampdf$TimePeriod != "6W",], aes(Axis.1,Axis.2, color = StatusAge)) + 
-  geom_point(size = 2) +
-  scale_shape_manual(values = sampdf$dFeedingModeED, name = "Feeding Mode", labels = c("Breast", "Formula", "Mixed"))+
+pdf(file = "betaFeeding2.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$TimePeriod != "6W",], aes(Axis.1,Axis.2, color = StatusAge, shape = as.factor(dFeedingModeED))) + 
+  scale_shape_manual(values = c(15,17,1),name = "Feeding Mode", labels = c("Breast", "Formula", "Mixed"))+
+  geom_point(size = 5) +
    labs(x = "PC 1", y = "PC 2")+
-  theme_bw(base_size = 25) +
+  theme_bw(base_size = 20) +
   scale_color_manual(values = GreenBlues[3:10], name = "Age Status")
 dev.off()
 
 ```
+
+```{r CF beta feeding, echo = FALSE}
+
+pdf(file = "betaCFfeeding.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="CF",], aes(Axis.1,Axis.2, color = TimePeriod, shape = as.factor(dFeedingModeED))) + 
+  scale_shape_manual(values = c(15,17,1),name = "Feeding Mode", labels = c("Breast", "Formula", "Mixed"))+ 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = Blues, name = "Age")
+dev.off()
+
+pdf(file = "betaCFfeeding2.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod, shape = as.factor(dFeedingModeED))) + 
+  scale_shape_manual(values = c(15,17,1),name = "Feeding Mode", labels = c("Breast", "Formula", "Mixed"))+ 
+  geom_point(size = 5) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = Blues, name = "Age")
+dev.off()
+
+```
+
+```{r HC beta, echo = FALSE}
+HC1 <- sampdf[sampdf$unq_id == "ah_80014963",]
+HC1$TimePeriod
+HC1 <- HC1[c(4,2,3,5,1),]
+HC2 <- sampdf[sampdf$unq_id == "ah_80014967",]
+HC2 <- HC2[c(4,2,3,5,1),]
+HC3 <- sampdf[sampdf$unq_id == "ah_80013785",]
+HC3 <- HC3[c(4,2,3,5,1),]
+HC4 <- sampdf[sampdf$unq_id == "ah_80014035",]
+HC4 <- HC4[c(4,2,3,5,1),]
+
+pdf(file = "betaHCAge.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = Greens, name = "Age")
+dev.off()
+pdf(file = "betaHCAgeProg1.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = c(Greens), name = "Age")+
+  geom_point(data = HC1[1,], color = Pinks[1],size = 5)+
+  geom_point(data = HC2[1,], color = Oranges[1],size = 5)+
+  geom_point(data = HC3[1,], color = Purples[1],size = 5)+
+  geom_point(data = HC4[1,], color = Reds[1],size = 5)
+dev.off()
+pdf(file = "betaHCAgeProg2.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = c(Greens), name = "Age")+
+  geom_path(data = HC1[1:2,], color = Pinks[1:2],size = 2, lineend = "round")+
+  geom_path(data = HC2[1:2,], color = Oranges[1:2],size = 2, lineend = "round")+
+  geom_path(data = HC3[1:2,], color = Purples[1:2],size = 2, lineend = "round")+
+  geom_path(data = HC4[1:2,], color = Reds[1:2],size = 2, lineend = "round")+
+  geom_point(data = HC1[1:2,], color = Pinks[1:2],size = 5)+
+  geom_point(data = HC2[1:2,], color = Oranges[1:2],size = 5)+
+  geom_point(data = HC3[1:2,], color = Purples[1:2],size = 5)+
+  geom_point(data = HC4[1:2,], color = Reds[1:2],size = 5)
+dev.off()
+
+pdf(file = "betaHCAgeProg3.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = c(Greens), name = "Age")+
+  geom_path(data = HC1[1:3,], color = Pinks[1:3],size = 2, lineend = "round")+
+  geom_path(data = HC2[1:3,], color = Oranges[1:3],size = 2, lineend = "round")+
+  geom_path(data = HC3[1:3,], color = Purples[1:3],size = 2, lineend = "round")+
+  geom_path(data = HC4[1:3,], color = Reds[1:3],size = 2, lineend = "round")+
+  geom_point(data = HC1[1:3,], color = Pinks[1:3],size = 5)+
+  geom_point(data = HC2[1:3,], color = Oranges[1:3],size = 5)+
+  geom_point(data = HC3[1:3,], color = Purples[1:3],size = 5)+
+  geom_point(data = HC4[1:3,], color = Reds[1:3],size = 5)
+dev.off()
+pdf(file = "betaHCAgeProg4.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = c(Greens), name = "Age")+
+  geom_path(data = HC1[1:4,], color = Pinks[1:4],size = 2, lineend = "round")+
+  geom_path(data = HC2[1:4,], color = Oranges[1:4],size = 2, lineend = "round")+
+  geom_path(data = HC3[1:4,], color = Purples[1:4],size = 2, lineend = "round")+
+  geom_path(data = HC4[1:4,], color = Reds[1:4],size = 2, lineend = "round")+
+  geom_point(data = HC1[1:4,], color = Pinks[1:4],size = 5)+
+  geom_point(data = HC2[1:4,], color = Oranges[1:4],size = 5)+
+  geom_point(data = HC3[1:4,], color = Purples[1:4],size = 5)+
+  geom_point(data = HC4[1:4,], color = Reds[1:4],size = 5)
+dev.off()
+
+pdf(file = "betaHCAgeProg5.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = c(Greens), name = "Age")+
+  geom_path(data = HC1[1:5,], color = Pinks[1:5],size = 2, lineend = "round")+
+  geom_path(data = HC2[1:5,], color = Oranges[1:5],size = 2, lineend = "round")+
+  geom_path(data = HC3[1:5,], color = Purples[1:5],size = 2, lineend = "round")+
+  geom_path(data = HC4[1:5,], color = Reds[1:5],size = 2, lineend = "round")+
+  geom_point(data = HC1[1:5,], color = Pinks[1:5],size = 5)+
+  geom_point(data = HC2[1:5,], color = Oranges[1:5],size = 5)+
+  geom_point(data = HC3[1:5,], color = Purples[1:5],size = 5)+
+  geom_point(data = HC4[1:5,], color = Reds[1:5],size = 5)
+dev.off()
+```
+
+```{r CF beta, echo = FALSE}
+
+pdf(file = "betaCFAge.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="CF",], aes(Axis.1,Axis.2, color = TimePeriod)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = Blues, name = "Age")
+dev.off()
+CF1 <- CFsamp[CFsamp$unq_id == "116",]
+CF2 <- CFsamp[CFsamp$unq_id == "124",]
+CF3 <- CFsamp[CFsamp$unq_id == "126",] 
+CF4 <- CFsamp[CFsamp$unq_id == "130",]
+  
+pdf(file = "betaCFAge2.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = Blues, name = "Age")
+dev.off()
+
+pdf(file = "betaCFAge2prog1.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = Blues, name = "Age")+
+  geom_point(data = CF1[1,], color = Pinks[1],size = 5)+
+  geom_point(data = CF2[1,], color = Oranges[1],size = 5)+
+  geom_point(data = CF3[1,], color = Purples[1],size = 5)+
+  geom_point(data = CF4[1,], color = Reds[1],size = 5)
+
+dev.off()
+pdf(file = "betaCFAge2prog2.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = Blues, name = "Age")+
+  geom_path(data = CF1[1:2,], color = Pinks[1:2],size = 2, lineend = "round")+
+  geom_path(data = CF2[1:2,], color = Oranges[1:2],size = 2, lineend = "round")+
+  geom_path(data = CF3[1:2,], color = Purples[1:2],size = 2, lineend = "round")+
+  geom_path(data = CF4[1:2,], color = Reds[1:2],size = 2, lineend = "round")+
+  geom_point(data = CF1[1:2,], color = Pinks[1:2],size = 5)+
+  geom_point(data = CF2[1:2,], color = Oranges[1:2],size = 5)+
+  geom_point(data = CF3[1:2,], color = Purples[1:2],size = 5)+
+  geom_point(data = CF4[1:2,], color = Reds[1:2],size = 5)
+dev.off()
+
+pdf(file = "betaCFAge2prog3.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = Blues, name = "Age")+
+  geom_path(data = CF1[1:3,], color = Pinks[1:3],size = 2, lineend = "round")+
+  geom_path(data = CF2[1:3,], color = Oranges[1:3],size = 2, lineend = "round")+
+  geom_path(data = CF3[1:3,], color = Purples[1:3],size = 2, lineend = "round")+
+  geom_path(data = CF4[1:3,], color = Reds[1:3],size = 2, lineend = "round")+
+  geom_point(data = CF1[1:3,], color = Pinks[1:3],size = 5)+
+  geom_point(data = CF2[1:3,], color = Oranges[1:3],size = 5)+
+  geom_point(data = CF3[1:3,], color = Purples[1:3],size = 5)+
+  geom_point(data = CF4[1:3,], color = Reds[1:3],size = 5)
+dev.off()
+
+pdf(file = "betaCFAge2prog4.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = Blues, name = "Age")+
+  geom_path(data = CF1[1:4,], color = Pinks[1:4],size = 2, lineend = "round")+
+  geom_path(data = CF2[1:4,], color = Oranges[1:4],size = 2, lineend = "round")+
+  geom_path(data = CF3[1:4,], color = Purples[1:4],size = 2, lineend = "round")+
+  geom_path(data = CF4[1:4,], color = Reds[1:4],size = 2, lineend = "round")+
+  geom_point(data = CF1[1:4,], color = Pinks[1:4],size = 5)+
+  geom_point(data = CF2[1:4,], color = Oranges[1:4],size = 5)+
+  geom_point(data = CF3[1:4,], color = Purples[1:4],size = 5)+
+  geom_point(data = CF4[1:4,], color = Reds[1:4],size = 5)
+dev.off()
+
+pdf(file = "betaCFAge2prog5.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = Blues, name = "Age")+
+  geom_path(data = CF1[1:5,], color = Pinks[1:5],size = 2, lineend = "round")+
+  geom_path(data = CF2[1:5,], color = Oranges[1:5],size = 2, lineend = "round")+
+  geom_path(data = CF3[1:5,], color = Purples[1:5],size = 2, lineend = "round")+
+  geom_path(data = CF4[1:5,], color = Reds[1:5],size = 2, lineend = "round")+
+  geom_point(data = CF1[1:5,], color = Pinks[1:5],size = 5)+
+  geom_point(data = CF2[1:5,], color = Oranges[1:5],size = 5)+
+  geom_point(data = CF3[1:5,], color = Purples[1:5],size = 5)+
+  geom_point(data = CF4[1:5,], color = Reds[1:5],size = 5)
+dev.off()
+
+```
+
+```{r CF beta Panc, echo = FALSE}
+
+
+pdf(file = "betaCFPanc.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="CF",], aes(Axis.1,Axis.2, shape = PancIns, color = PancIns)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Pancreas", labels = c("Sufficient", "Insufficient")) +
+ scale_color_manual(values =Blues[2:4], name = "Pancreas", labels = c("Sufficient", "Insufficient"))
+
+dev.off()
+
+pdf(file = "betaCFPanc2.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, shape = PancIns, color = PancIns)) + 
+  geom_point(size = 5) +
+   labs(x = "PC 1", y = "PC 2") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Pancreas", labels = c("Sufficient", "Insufficient")) +
+ scale_color_manual(values =Blues[2:5], name = "Pancreas", labels = c("Sufficient", "Insufficient"))
+
+dev.off()
+```
+
+```{r CF beta PulmEx, echo = FALSE}
+
+
+pdf(file = "betaCFPulmEx.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="CF",], aes(Axis.1,Axis.2, shape = PulmEx1yr, color = PulmEx1yr)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Exacerbation", labels = c("No", "Yes")) +
+ scale_color_manual(values =Blues[2:5], name = "Exacerbation", labels = c("No", "Yes"))
+dev.off()
+
+pdf(file = "betaCFPulmEx2.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, shape = PulmEx1yr, color = PulmEx1yr)) + 
+  geom_point(size = 5) +
+   labs(x = "PC 1", y = "PC 2") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Exacerbation", labels = c("No", "Yes")) +
+ scale_color_manual(values =Blues[2:5], name = "Exacerbation", labels = c("No", "Yes"))
+dev.off()
+```
+
+```{r CF beta b4PulmEx, echo = FALSE}
+
+
+pdf(file = "betaCFB4PulmEx.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="CF",], aes(Axis.1,Axis.2, shape = B4PulmEx, color = B4PulmEx)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Before Pulm Ex", labels = c("No", "Yes")) +
+ scale_color_manual(values =Blues[2:5], name = "Before Pulm Ex", labels = c("No", "Yes"))
+dev.off()
+
+pdf(file = "betaCFB4PulmEx2.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, shape = B4PulmEx, color = B4PulmEx)) + 
+  geom_point(size = 5) +
+   labs(x = "PC 1", y = "PC 2") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Before Pulm Ex", labels = c("No", "Yes")) +
+ scale_color_manual(values =Blues[2:5], name = "Before Pulm Ex", labels = c("No", "Yes"))
+dev.off()
+
+```
+
+```{r CF beta delmode, echo = FALSE}
+
+
+pdf(file = "betaCFDelMode.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="CF",], aes(Axis.1,Axis.2, shape = DeliveryMode, color = DeliveryMode)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Delivery Mode", labels = c("C-Section", "Vaginal")) +
+ scale_color_manual(values =Blues[2:5], name = "Delivery Mode", labels = c("C-Section", "Vaginal"))
+dev.off()
+
+pdf(file = "betaCFDelMode2.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, shape = DeliveryMode, color = DeliveryMode)) + 
+  geom_point(size = 5) +
+   labs(x = "PC 1", y = "PC 2") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Delivery Mode", labels = c("C-Section", "Vaginal")) +
+ scale_color_manual(values =Blues[2:5], name = "Delivery Mode", labels = c("C-Section", "Vaginal"))
+dev.off()
+
+```
+
+```{r CF beta Sex, echo = FALSE}
+
+
+pdf(file = "betaCFSex.pdf", height = 8, width = 12)
+ggplot(sampdf[sampdf$Status =="CF",], aes(Axis.1,Axis.2, shape = Sex, color = Sex)) + 
+  geom_point(size = 4) +
+   labs(x = "PC 1", y = "PC 2") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Sex", labels = c("Female", "Male")) +
+ scale_color_manual(values =Blues[2:5], name = "Sex", labels = c("Female", "Male"))
+dev.off()
+
+pdf(file = "betaCFSex2.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, shape = Sex, color = Sex)) + 
+  geom_point(size = 5) +
+   labs(x = "PC 1", y = "PC 2") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Sex", labels = c("Female", "Male")) +
+ scale_color_manual(values =Blues[2:5], name = "Sex", labels = c("Female", "Male"))
+dev.off()
+```
+
+```{r tSNE, echo = FALSE}
+
+#testing out t-Distributed Stochastic Neighbor Embedding(tSNE) plots
+#setting seed for consistent output
+set.seed(333)
+
+tSNEtest<- Rtsne(d5,dims=2,perplexity= 75, is_distance = TRUE)
+
+ggplot(sampdf[sampdf$TimePeriod != "6W",], aes(tSNEtest$Y[sampdf$TimePeriod != "6W",1],tSNEtest$Y[sampdf$TimePeriod != "6W",2], color = StatusAge)) + 
+  geom_point(size = 3) +
+   labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = GreenBlues[3:10], name = "Age Status")
+
+
+```
+
+
 ```{r heatmap, echo = FALSE}
 
 #Prepping ASV table for heatmap
 
 
-
+heatmap <- plot_heatmap(phylo)
 
 pdf("heatmap.pdf")
 heatmap
@@ -205,9 +627,153 @@ dev.off()
 multcomtaxa <- mt(phylo, "Status")
 multcomtaxa$adjp
 multcomtaxa$Genus[1:25]
+write.csv(multcomtaxa, file = "CFHCtaxaComp.csv")
+BactCounts <- colSums(phylo@otu_table@.Data)[multcomtaxa$index[which(multcomtaxa$Genus == "Bacteroides")]]
+Bacteroides <- cbind(multcomtaxa[which(multcomtaxa$Genus == "Bacteroides"),], BactCounts)
+write.csv(Bacteroides, file = "Bacteroides.csv")
+
+
+
+
+phylo6W <-phylo %>% subset_samples(TimePeriod %in% "6W") 
+phylo4M <-phylo %>% subset_samples(TimePeriod %in% "4M") 
+phylo6M <-phylo %>% subset_samples(TimePeriod %in% "6M") 
+phylo9M <-phylo %>% subset_samples(TimePeriod %in% "9M") 
+phylo12M <-phylo %>% subset_samples(TimePeriod %in% "12M") 
+phyloCF <-phylo %>% subset_samples(Status %in% "CF") 
+multcomtaxa6W <- mt(phylo6W, "Status")
+multcomtaxa4M <- mt(phylo4M, "Status")
+multcomtaxa6M <- mt(phylo6M, "Status")
+multcomtaxa9M <- mt(phylo9M, "Status")
+multcomtaxa12M <- mt(phylo12M, "Status")
+multcomtaxaPulmEx <- mt(phyloCF, "PulmEx1yr")
+multcomtaxaPanc <- mt(phyloCF, "PancIns")
+
+write.csv(multcomtaxa6W, file = "CFHCtaxa6W.csv")
+write.csv(multcomtaxa4M, file = "CFHCtaxa4M.csv")
+write.csv(multcomtaxa9M, file = "CFHCtaxa9M.csv")
+write.csv(multcomtaxa12M, file = "CFHCtaxa12M.csv")
+write.csv(multcomtaxa6M, file = "CFHCtaxa6M.csv")
+write.csv(multcomtaxaPulmEx, file = "CFHCtaxaPulmEx.csv")
+write.csv(multcomtaxaPanc, file = "CFHCtaxaPanc.csv")
+
+
+multcompRA <- mt(phylo20RA, "Status")
+write.csv(multcompRA,file = "CFHCtop20.csv")
+
+
+phyloGenus <- tax_glom(phylo,taxrank = "Genus", NArm = FALSE)
+
+multcompGenus <- mt(phyloGenus, "Status")
+
+write.csv(multcompGenus, file = "CFHCGenus.csv")
+
+phyloCFgenus <- tax_glom(phyloCF, taxrank = "Genus", NArm = FALSE)
+
+mtCFPulmExGenus <- mt(phyloCFgenus, "PulmEx1yr")
+write.csv(mtCFPulmExGenus, file = "CFPulmExGenus.csv")
+
+RAphylo <- transform_sample_counts(phyloGenus, function(x) x / sum(x))
+rowSums(RAphylo@otu_table@.Data)
+
+#top 20 for bar plot
+Top20 <- names(sort(taxa_sums(phyloGenus), TRUE)[1:20])
+phylo20 <- prune_taxa(Top20, phyloGenus)
+
+phylo20StatAge <- merge_samples(phylo20, sampdf$StatusAge)
+phylo20RA <- transform_sample_counts(phylo20, function(x) x / sum(x))
+phylo20StatAgeRA <- transform_sample_counts(phylo20StatAge, function(x) x / sum(x))
+rowSums(phylo20StatAgeRA@otu_table@.Data)
+
+phylo20StatAgeRA@tax_table[,6]
+phylo20StatAgeRA@otu_table[,5]
+
+pdf("RABarplotTest.pdf", height = 20, width = 20)
+plot_bar(phylo20StatAgeRA) 
+dev.off()
+
+BPtestOTU <- phylo20StatAgeRA@otu_table
+colnames(BPtestOTU) <- phylo20StatAgeRA@tax_table[,6]
+colnames(BPtestOTU)[4]<-paste("o_",phylo20StatAgeRA@tax_table[4,5], "_g_NA",sep="")
+colnames(BPtestOTU)
+#reshaping data got ggplot
+BPtest2 <- psmelt(BPtestOTU)
+colnames(BPtest2) <- c("Genus","Sample","Abundance")
+BPtest2$Sample <- factor(BPtest2$Sample, levels = c("6W CF","4M CF","6M CF", "9M CF", "12M CF",
+                                                    "6W HC","4M HC","6M HC", "9M HC", "12M HC"))
+BPtest2 <- BPtest2[order(BPtest2$Abundance),]
+
+colors = c( "#D896FF", "#E30074", "#FF4E50", "#FC913A", "#FFAAA5", "#FFD3B6", "#EAE374", "#F9D62E",  
+             "#8AE429", "#E2F4C7", "#9AFE2E", "#FE00F6", "#77AAFF", "#99CCFF", "#FF9900",
+             "#A8E6CF", "#00F9FF", "#005EFF", "#009FFF", "#0900FF", "#00308F", "#B8D000", "#4D7F17", "#6BB120",
+             "#BBEEFF", "#800080", "#BE29EC", "#EFBBFF", "#FF8B94", "#0392CF", "#FDF498", "#FFD4E5", "#D4FFEA",
+             "#EECBFF", "#DBDCFF", "#FE0000", "#E08822", "#5E8EB7", "#BD5757", "#EE4035", 
+             "#73BA9F", "#FDFE02", "#9BA2FF", "#D4CAC5")
+
+pdf("RABarplot.pdf", height = 10, width = 20)
+ ggplot(BPtest2, aes(x = Sample, y = Abundance, fill = Genus, group = Abundance)) + geom_bar(stat = 'identity') + theme(legend.position = "bottom") +theme_bw(base_size =25)+ theme(legend.position = "bottom") + scale_fill_manual(values = Rainbow2) +xlab("Age and Health Status") +ylab("Relative Abundance %")
+dev.off()
+
+```
+
+
+
+```{r RAplot, echo = FALSE}
+                                 
+A20merge <- merge_samples(phylo20RA,sampdf$Status, fun = mean)
+rowSums(A20merge@otu_table@.Data)
+colSums(A20merge@otu_table@.Data)
+A20mergeRA <- transform_sample_counts(A20merge, function(x) x / sum(x))
+
+
+#Find difference in means
+meandif <- A20mergeRA@otu_table@.Data[1,] - A20mergeRA@otu_table@.Data[2,]
+
+Gen20 <- phylo20RA@tax_table[order(meandif),6]
+#replace NA with actual taxa
+Gen20[9]<-paste("o_",phylo20RA@tax_table[4,5], "_g_NA",sep="")
+Gen20
+
+#########################################################################
+
+factor1 <- rownames(sampdf[sampdf$Status == "CF",])
+factor2 <- rownames(sampdf[sampdf$Status == "HC",])
+#RA plot
+ pdf(file = "RAtest2.pdf", width = 18, height = 10)
+    par(mar=c(7.1,30.1,7.1,15.1))
+    plot(0,1, xlim = c(-1,1), ylim = c(1,20), xlab = "Relative abundance %", ylab = "", yaxt = 'n', xaxt = 'n',cex.lab = 2)
+    title(main = "Top taxa differences", cex.main = 2.5)
+    grid(ny = 20)
+    par(xpd = TRUE)
+    legend(1.1,20.75, legend = c ("Sample Relative Abundances", "Mean Relative Abundance","Difference in Means"), col = c("black","steelblue","red"), pch = 16, title = "Legend", cex = 1)
+    lines(x = c(0,0),y = c(0.25,20.75))
+
+     for (i in 1:20){
+       #plot relative abundances
+      j = names(sort(meandif))[i]
+      points(x = -phylo20RA@otu_table@.Data[factor = factor1,j],rep(i,length(factor1)), type = 'p', pch = 16, col = "black")
+      points(x = phylo20RA@otu_table@.Data[factor = factor2,j],rep(i,length(factor2)), type = 'p', pch = 16, col = "black")
+      
+     }
+
+    #plot means and difference in means
+    points(x = -A20mergeRA@otu_table@.Data[2,order(meandif)], y = c(1:20), xlim = c(-1,1),xlab = "", ylab = "", pch = 16, col = 'steelblue1',
+          yaxt = 'n', xaxt = 'n',cex = 1.5)
+   points(x = A20mergeRA@otu_table@.Data[1,order(meandif)], y = c(1:20), xlim = c(-1,1),xlab = "", ylab = "", pch = 16, col = 'steelblue1',
+         yaxt = 'n', xaxt = 'n',cex = 1.5)
+    points(x = sort(meandif), y = c(1:20), xlim = c(-1,1),xlab = "Relative abundance%",ylab = "", pch = 16, col = 'red',
+           yaxt = 'n', xaxt = 'n', cex = 1.75)
+    #add axis labels
+    axis(2, at = c(1:20), labels = Gen20, las = 2,cex.axis =2, font = 3)
+    axis(1,at = c(-1,-0.5,0,0.5,1), labels = c("100%","CF","0%","HC","100%"),cex.axis = 2)
+    #lines(x = rep(0,27), y = c(0:26))
+    
+    dev.off()
+
 
 
 ```
+
 
 
 
