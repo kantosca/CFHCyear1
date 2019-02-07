@@ -34,6 +34,7 @@ library(Rtsne)
 library(gganimate)
 library(gifski)
 library(png)
+library(lme4)
 ```
 
 
@@ -83,6 +84,7 @@ plot(1:10,1:10,col =Blues ,pch = 19,cex = 2)
 plot(1:30,1:30,col = Rainbow,pch = 19,cex = 2)
 Rainbow <- as.vector(cbind(Pinks[1:4], Reds[2:4], Oranges[1:4], Greens[1:4], Blues[1:4], Purples[1:4]))
 Rainbow2 <- as.vector(cbind(Blues[1:4], Greens[1:4], Oranges[1:4], Pinks[1:4], Purples[1:4]))
+Rainbow2[4] <- Blues[5]
 
 wilcox.test(sampdf$Shannon[sampdf$TimePeriod == "6W"]~sampdf$Status[sampdf$TimePeriod == "6W"])
 wilcox.test(sampdf$Shannon[sampdf$TimePeriod == "4M"]~sampdf$Status[sampdf$TimePeriod == "4M"])
@@ -161,7 +163,12 @@ dev.off()
 sampdf$StatusAge <- factor(sampdf$StatusAge, 
                            levels = c("6W CF","4M CF", "6M CF", "9M CF", "12M CF",
                                       "6W HC", "4M HC", "6M HC","9M HC","12M HC"))
-summary(glm(sampdf$Shannon~sampdf$StatusAge+sampdf$dFeedingModeED))
+
+PancAll <- sampdf$PancIns
+PancAll[sampdf$Status == "HC"] <- "No"
+PulmExAll <- sampdf$PulmEx1yr
+PulmExAll[sampdf$Status == "HC"] <- "No"
+summary(glm(sampdf$Shannon~sampdf$TimePeriod+sampdf$Status+sampdf$dFeedingModeED + PancAll + PulmExAll))
 
 ```
 
@@ -173,25 +180,7 @@ summary(glm(sampdf$Shannon~sampdf$StatusAge+sampdf$dFeedingModeED))
 
 ```
 
-```{r phylotree, echo = FALSE}
-#multiple alignments with DECIPHER then create the tree with phangorn RaxML via the ips package within R
-seqs <- getSequences(year1seqtab)
-# This propagates to the tip labels of the tree
-names(seqs) <- seqs 
-alignment <- AlignSeqs(DNAStringSet(seqs), anchor=NA,verbose=FALSE)
 
-#From https://bioconductor.org/help/course-materials/2017/BioC2017/Day1/Workshops/Microbiome/MicrobiomeWorkflowII.html The phangorn R package is then used to construct a phylogenetic tree. Here we first construct a neighbor-joining tree, and then fit a GTR+G+I (Generalized time-reversible with Gamma rate variation) maximum likelihood tree using the neighbor-joining tree as a starting point.
-
-phangAlign <- phyDat(as(alignment, "matrix"), type="DNA")
-dm <- dist.ml(phangAlign)
-treeNJ <- NJ(dm) # Note, tip order != sequence order
-fit = pml(treeNJ, data=phangAlign)
-fitGTR <- update(fit, k=4, inv=0.2)
-fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
-        rearrangement = "stochastic", control = pml.control(trace = 0))
-
-
-```
 
 
 
@@ -248,6 +237,8 @@ CFpcs <- pcoa(CFd5, correction = "cailliez")
 CFpc1_2 <- CFpcs$vectors[,1:2]
 colnames(CFpc1_2) <- c("PC1","PC2")
 CFsamp <- cbind(CFsamp,CFpc1_2)
+CFpcs$values$Broken_stick[1:2]
+pcs$values$Broken_stick[1:2]
 
 colnames(d5) == sampdf$mblid  
 Pcs6W <- pcoa(d5[sampdf$TimePeriod == "6W",sampdf$TimePeriod == "6W"], correction = "cailliez")
@@ -258,7 +249,6 @@ Pcs12M <- pcoa(d5[sampdf$TimePeriod == "12M",sampdf$TimePeriod == "12M"], correc
 
 #ordination for plotting
 pcs <- pcoa(d5, correction = "cailliez")
-
 
 rownames(sampdf) == rownames(pcs$vectors)
 #modify  sample data for plotting
@@ -275,6 +265,19 @@ ggplot(sampdf[sampdf$TimePeriod != "6W",], aes(Axis.1,Axis.2, color = StatusAge)
    labs(x = "PC 1", y = "PC 2")+
   theme_bw(base_size = 25) +
   scale_color_manual(values = c(GreenBlues[3:10]), name = "Age Status")
+dev.off()
+#reversing database to plot HC samples first and adding age based PCoA columns
+revsamp <- sampdf[nrow(sampdf):1,]
+
+pdf(file = "betaAlltime.pdf", height = 8.5, width = 12)
+ggplot(revsamp, aes(Axis.1,Axis.2, color = StatusAge)) + 
+  geom_point(size = 3) +
+  labs(x = "PC 1", y = "PC 2")+
+  theme_bw(base_size = 25) +
+  scale_color_manual(values = c(Blues,Greens), name = "Age Status")+
+  facet_wrap(revsamp$TimePeriod,labeller = as_labeller(c("6W" = "6 Weeks","4M" = "4 Months", "6M" = "6 Months", "9M" = "9 Months", "12M" = "12 Months")) )+
+  stat_ellipse()+ 
+  theme(legend.position = c(1, 0), legend.justification = c(1.25, 0))
 dev.off()
 
 pdf(file = "betaPancSufAll.pdf", height = 8, width = 12)
@@ -375,10 +378,10 @@ ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
    labs(x = "PC 1", y = "PC 2")+
   theme_bw(base_size = 25) +
   scale_color_manual(values = c(Greens), name = "Age")+
-  geom_point(data = HC1[1,], shape = 17, color = Pinks[1],size = 5)+
-  geom_point(data = HC2[1,], shape = 17, color = Oranges[1],size = 5)+
-  geom_point(data = HC3[1,], shape = 17, color = Purples[1],size = 5)+
-  geom_point(data = HC4[1,], shape = 17, color = Reds[1],size = 5)
+  geom_point(data = HC1[1,], shape = 17, color =   Pinks[1],size = 8)+
+  geom_point(data = HC2[1,], shape = 17, color = Oranges[1],size = 8)+
+  geom_point(data = HC3[1,], shape = 17, color = Purples[1],size = 8)+
+  geom_point(data = HC4[1,], shape = 17, color =    Reds[1],size = 8)
 dev.off()
 pdf(file = "betaHCAgeProg2.pdf", height = 8, width = 12)
 ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
@@ -394,10 +397,10 @@ ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
   geom_point(data = HC2[1,], color = Oranges[1],size = 5)+
   geom_point(data = HC3[1,], color = Purples[1],size = 5)+
   geom_point(data = HC4[1,], color = Reds[1],size = 5)+
-  geom_point(data = HC1[2,], shape = 17, color = Pinks[2],size = 5)+
-  geom_point(data = HC2[2,], shape = 17, color = Oranges[2],size = 5)+
-  geom_point(data = HC3[2,], shape = 17, color = Purples[2],size = 5)+
-  geom_point(data = HC4[2,], shape = 17, color = Reds[2],size = 5)
+  geom_point(data = HC1[2,], shape = 17, color =   Pinks[2],size = 8)+
+  geom_point(data = HC2[2,], shape = 17, color = Oranges[2],size = 8)+
+  geom_point(data = HC3[2,], shape = 17, color = Purples[2],size = 8)+
+  geom_point(data = HC4[2,], shape = 17, color =    Reds[2],size = 8)
 dev.off()
 
 pdf(file = "betaHCAgeProg3.pdf", height = 8, width = 12)
@@ -414,10 +417,10 @@ ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
   geom_point(data = HC2[1:2,], color = Oranges[1:2],size = 5)+
   geom_point(data = HC3[1:2,], color = Purples[1:2],size = 5)+
   geom_point(data = HC4[1:2,], color = Reds[1:2],size = 5)+
-  geom_point(data = HC1[3,], shape = 17, color = Pinks[3],size = 5)+
-  geom_point(data = HC2[3,], shape = 17, color = Oranges[3],size = 5)+
-  geom_point(data = HC3[3,], shape = 17, color = Purples[3],size = 5)+
-  geom_point(data = HC4[3,], shape = 17, color = Reds[3],size = 5)
+  geom_point(data = HC1[3,], shape = 17, color =   Pinks[3],size = 8)+
+  geom_point(data = HC2[3,], shape = 17, color = Oranges[3],size = 8)+
+  geom_point(data = HC3[3,], shape = 17, color = Purples[3],size = 8)+
+  geom_point(data = HC4[3,], shape = 17, color =    Reds[3],size = 8)
 dev.off()
 pdf(file = "betaHCAgeProg4.pdf", height = 8, width = 12)
 ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
@@ -433,10 +436,10 @@ ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
   geom_point(data = HC2[1:3,], color = Oranges[1:3],size = 5)+
   geom_point(data = HC3[1:3,], color = Purples[1:3],size = 5)+
   geom_point(data = HC4[1:3,], color = Reds[1:3],size = 5)+
-  geom_point(data = HC1[4,], shape = 17, color = Pinks[4],size = 5)+
-  geom_point(data = HC2[4,], shape = 17, color = Oranges[4],size = 5)+
-  geom_point(data = HC3[4,], shape = 17, color = Purples[4],size = 5)+
-  geom_point(data = HC4[4,], shape = 17, color = Reds[4],size = 5)
+  geom_point(data = HC1[4,], shape = 17, color =   Pinks[4],size = 8)+
+  geom_point(data = HC2[4,], shape = 17, color = Oranges[4],size = 8)+
+  geom_point(data = HC3[4,], shape = 17, color = Purples[4],size = 8)+
+  geom_point(data = HC4[4,], shape = 17, color =    Reds[4],size = 8)
 dev.off()
 
 pdf(file = "betaHCAgeProg5.pdf", height = 8, width = 12)
@@ -453,10 +456,10 @@ ggplot(sampdf[sampdf$Status =="HC",], aes(Axis.1,Axis.2, color = TimePeriod)) +
   geom_point(data = HC2[1:4,], color = Oranges[1:4],size = 5)+
   geom_point(data = HC3[1:4,], color = Purples[1:4],size = 5)+
   geom_point(data = HC4[1:4,], color = Reds[1:4],size = 5)+
-  geom_point(data = HC1[5,], shape = 17, color = Pinks[5],size = 5)+
-  geom_point(data = HC2[5,], shape = 17, color = Oranges[5],size = 5)+
-  geom_point(data = HC3[5,], shape = 17, color = Purples[5],size = 5)+
-  geom_point(data = HC4[5,], shape = 17, color = Reds[5],size = 5)
+  geom_point(data = HC1[5,], shape = 17, color =   Pinks[5],size = 8)+
+  geom_point(data = HC2[5,], shape = 17, color = Oranges[5],size = 8)+
+  geom_point(data = HC3[5,], shape = 17, color = Purples[5],size = 8)+
+  geom_point(data = HC4[5,], shape = 17, color =    Reds[5],size = 8)
 dev.off()
 ```
 
@@ -488,10 +491,10 @@ ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) +
    labs(x = "PC 1", y = "PC 2")+
   theme_bw(base_size = 25) +
   scale_color_manual(values = Blues, name = "Age")+
-  geom_point(data = CF1[1,],shape = 17, color =   Pinks[1],size = 5)+
-  geom_point(data = CF2[1,],shape = 17, color = Oranges[1],size = 5)+
-  geom_point(data = CF3[1,],shape = 17, color = Purples[1],size = 5)+
-  geom_point(data = CF4[1,],shape = 17, color =    Reds[1],size = 5)
+  geom_point(data = CF1[1,],shape = 17, color =   Pinks[1],size = 8)+
+  geom_point(data = CF2[1,],shape = 17, color = Oranges[1],size = 8)+
+  geom_point(data = CF3[1,],shape = 17, color = Purples[1],size = 8)+
+  geom_point(data = CF4[1,],shape = 17, color =    Reds[1],size = 8)
 
 dev.off()
 pdf(file = "betaCFAge2prog2.pdf", height = 8, width = 12)
@@ -508,10 +511,10 @@ ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) +
   geom_point(data = CF2[1,], color = Oranges[1],size = 5)+
   geom_point(data = CF3[1,], color = Purples[1],size = 5)+
   geom_point(data = CF4[1,], color = Reds[1],size = 5)+
-  geom_point(data = CF1[2,],shape = 17, color =   Pinks[2],size = 5)+
-  geom_point(data = CF2[2,],shape = 17, color = Oranges[2],size = 5)+
-  geom_point(data = CF3[2,],shape = 17, color = Purples[2],size = 5)+
-  geom_point(data = CF4[2,],shape = 17, color =    Reds[2],size = 5)
+  geom_point(data = CF1[2,],shape = 17, color =   Pinks[2],size = 8)+
+  geom_point(data = CF2[2,],shape = 17, color = Oranges[2],size = 8)+
+  geom_point(data = CF3[2,],shape = 17, color = Purples[2],size = 8)+
+  geom_point(data = CF4[2,],shape = 17, color =    Reds[2],size = 8)
 dev.off()
 
 pdf(file = "betaCFAge2prog3.pdf", height = 8, width = 12)
@@ -528,10 +531,10 @@ ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) +
   geom_point(data = CF2[1:2,], color = Oranges[1:2],size = 5)+
   geom_point(data = CF3[1:2,], color = Purples[1:2],size = 5)+
   geom_point(data = CF4[1:2,], color = Reds[1:2],size = 5)+
-  geom_point(data = CF1[3,],shape = 17, color =   Pinks[3],size = 5)+
-  geom_point(data = CF2[3,],shape = 17, color = Oranges[3],size = 5)+
-  geom_point(data = CF3[3,],shape = 17, color = Purples[3],size = 5)+
-  geom_point(data = CF4[3,],shape = 17, color =    Reds[3],size = 5)
+  geom_point(data = CF1[3,],shape = 17, color =   Pinks[3],size = 8)+
+  geom_point(data = CF2[3,],shape = 17, color = Oranges[3],size = 8)+
+  geom_point(data = CF3[3,],shape = 17, color = Purples[3],size = 8)+
+  geom_point(data = CF4[3,],shape = 17, color =    Reds[3],size = 8)
 dev.off()
 
 pdf(file = "betaCFAge2prog4.pdf", height = 8, width = 12)
@@ -548,10 +551,10 @@ ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) +
   geom_point(data = CF2[1:3,], color = Oranges[1:3],size = 5)+
   geom_point(data = CF3[1:3,], color = Purples[1:3],size = 5)+
   geom_point(data = CF4[1:3,], color = Reds[1:3],size = 5)+
-  geom_point(data = CF1[4,],shape = 17, color =   Pinks[4],size = 5)+
-  geom_point(data = CF2[4,],shape = 17, color = Oranges[4],size = 5)+
-  geom_point(data = CF3[4,],shape = 17, color = Purples[4],size = 5)+
-  geom_point(data = CF4[4,],shape = 17, color =    Reds[4],size = 5)
+  geom_point(data = CF1[4,],shape = 17, color =   Pinks[4],size = 8)+
+  geom_point(data = CF2[4,],shape = 17, color = Oranges[4],size = 8)+
+  geom_point(data = CF3[4,],shape = 17, color = Purples[4],size = 8)+
+  geom_point(data = CF4[4,],shape = 17, color =    Reds[4],size = 8)
 dev.off()
 
 pdf(file = "betaCFAge2prog5.pdf", height = 8, width = 12)
@@ -568,10 +571,10 @@ ggplot(CFsamp, aes(PC1,PC2, color = TimePeriod)) +
   geom_point(data = CF2[1:4,], color = Oranges[1:4],size = 5)+
   geom_point(data = CF3[1:4,], color = Purples[1:4],size = 5)+
   geom_point(data = CF4[1:4,], color = Reds[1:4],size = 5)+
-  geom_point(data = CF1[5,],shape = 17, color =   Pinks[5],size = 5)+
-  geom_point(data = CF2[5,],shape = 17, color = Oranges[5],size = 5)+
-  geom_point(data = CF3[5,],shape = 17, color = Purples[5],size = 5)+
-  geom_point(data = CF4[5,],shape = 17, color =    Reds[5],size = 5)
+  geom_point(data = CF1[5,],shape = 17, color =   Pinks[5],size = 8)+
+  geom_point(data = CF2[5,],shape = 17, color = Oranges[5],size = 8)+
+  geom_point(data = CF3[5,],shape = 17, color = Purples[5],size = 8)+
+  geom_point(data = CF4[5,],shape = 17, color =    Reds[5],size = 8)
 dev.off()
 
 ```
@@ -606,7 +609,7 @@ dev.off()
 pdf(file = "betaCFPulmEx.pdf", height = 8, width = 12)
 ggplot(sampdf[sampdf$Status =="CF",], aes(Axis.1,Axis.2, shape = PulmEx1yr, color = PulmEx1yr)) + 
   geom_point(size = 4) +
-   labs(x = "PC 1", y = "PC 2") +
+   labs(x = "PC 1", y = "PC 2 (5%)") +
   theme_bw(base_size = 25) + 
   scale_shape_manual(values =c(17,19), name = "Exacerbation", labels = c("No", "Yes")) +
  scale_color_manual(values =Blues[2:5], name = "Exacerbation", labels = c("No", "Yes"))
@@ -615,10 +618,38 @@ dev.off()
 pdf(file = "betaCFPulmEx2.pdf", height = 8, width = 12)
 ggplot(CFsamp, aes(PC1,PC2, shape = PulmEx1yr, color = PulmEx1yr)) + 
   geom_point(size = 5) +
-   labs(x = "PC 1", y = "PC 2") +
+   labs(x = "PC 1 (7%)", y = "PC 2 (5%)") +
   theme_bw(base_size = 25) + 
   scale_shape_manual(values =c(17,19), name = "Exacerbation", labels = c("No", "Yes")) +
  scale_color_manual(values =Blues[2:5], name = "Exacerbation", labels = c("No", "Yes"))
+dev.off()
+
+#add group means and lines
+mns <- CFsamp %>% 
+        group_by(PulmEx1yr, TimePeriod) %>% 
+        summarise(x = mean(PC1), y = mean(PC2))
+
+pdf(file = "betaCFPulmEx3Ellipse.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, shape = PulmEx1yr, color = PulmEx1yr)) + 
+  geom_point(size = 5) +
+   labs(x = "PC 1 (7%)", y = "PC 2 (5%)") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Exacerbation", labels = c("No", "Yes")) +
+ scale_color_manual(values =Blues[2:5], name = "Exacerbation", labels = c("No", "Yes"))+
+  facet_wrap(CFsamp$TimePeriod, labeller = as_labeller(c("6W" = "6 Weeks","4M" = "4 Months", "6M" = "6 Months", "9M" = "9 Months", "12M" = "12 Months")))+
+  stat_ellipse()+
+  theme(legend.position = c(1, 0.25), legend.justification = c(1.1, 0))
+dev.off()
+
+pdf(file = "betaCFPulmEx3.pdf", height = 8, width = 12)
+ggplot(CFsamp, aes(PC1,PC2, shape = PulmEx1yr, color = PulmEx1yr)) + 
+  geom_point(size = 5) +
+   labs(x = "PC 1 (7%)", y = "PC 2 (5%)") +
+  theme_bw(base_size = 25) + 
+  scale_shape_manual(values =c(17,19), name = "Exacerbation", labels = c("No", "Yes")) +
+ scale_color_manual(values =Blues[2:5], name = "Exacerbation", labels = c("No", "Yes"))+
+  facet_wrap(CFsamp$TimePeriod, labeller = as_labeller(c("6W" = "6 Weeks","4M" = "4 Months", "6M" = "6 Months", "9M" = "9 Months", "12M" = "12 Months")))+
+  theme(legend.position = c(1, 0.25), legend.justification = c(1.1, 0))
 dev.off()
 ```
 
@@ -688,6 +719,8 @@ ggplot(CFsamp, aes(PC1,PC2, shape = Sex, color = Sex)) +
   scale_shape_manual(values =c(17,19), name = "Sex", labels = c("Female", "Male")) +
  scale_color_manual(values =Blues[2:5], name = "Sex", labels = c("Female", "Male"))
 dev.off()
+
+
 ```
 
 ```{r tSNE, echo = FALSE}
@@ -812,6 +845,8 @@ colnames(BPtest2) <- c("Genus","Sample","Abundance")
 BPtest2$Sample <- factor(BPtest2$Sample, levels = c("6W CF","4M CF","6M CF", "9M CF", "12M CF",
                                                     "6W HC","4M HC","6M HC", "9M HC", "12M HC"))
 BPtest2 <- BPtest2[order(BPtest2$Abundance),]
+BPtest2$Age <-factor(gsub( " .*$", "",BPtest2$Sample), levels = c("6W","4M","6M","9M","12M"))
+BPtest2$Status <- factor(substr(BPtest2$Sample, nchar(as.vector(BPtest2$Sample))-1,nchar(as.vector(BPtest2$Sample))))
 
 colors = c( "#D896FF", "#E30074", "#FF4E50", "#FC913A", "#FFAAA5", "#FFD3B6", "#EAE374", "#F9D62E",  
              "#8AE429", "#E2F4C7", "#9AFE2E", "#FE00F6", "#77AAFF", "#99CCFF", "#FF9900",
@@ -820,9 +855,22 @@ colors = c( "#D896FF", "#E30074", "#FF4E50", "#FC913A", "#FFAAA5", "#FFD3B6", "#
              "#EECBFF", "#DBDCFF", "#FE0000", "#E08822", "#5E8EB7", "#BD5757", "#EE4035", 
              "#73BA9F", "#FDFE02", "#9BA2FF", "#D4CAC5")
 
-pdf("RABarplot.pdf", height = 10, width = 20)
- ggplot(BPtest2, aes(x = Sample, y = Abundance, fill = Genus, group = Abundance)) + geom_bar(stat = 'identity') + theme(legend.position = "bottom") +theme_bw(base_size =25)+ theme(legend.position = "bottom") + scale_fill_manual(values = Rainbow2) +xlab("Age and Health Status") +ylab("Relative Abundance %")+
-  scale_y_continuous(labels = c("0","25","50","75","100"))
+pdf("RABarplot2.pdf", height = 10, width = 20)
+ ggplot(BPtest2, aes(x = Status, y = Abundance, fill = Genus, group = Abundance)) + geom_bar(stat = 'identity') +
+   theme_bw(base_size =28)+ 
+   theme(legend.position = "bottom",legend.text = element_text(face = "italic")) + 
+   scale_fill_manual(values = Rainbow2) +xlab("Age and Health Status") +ylab("Relative Abundance %")+
+  scale_y_continuous(labels = c("0","25","50","75","100"))+
+   facet_wrap(BPtest2$Age, labeller = as_labeller(c("6W" = "6 Weeks","4M" = "4 Months", "6M" = "6 Months", "9M" = "9 Months", "12M" = "12 Months")),ncol = 5 )
+dev.off()
+
+pdf("RABarplot3.pdf", height = 10, width = 20)
+ ggplot(BPtest2, aes(x = Age, y = Abundance, fill = Genus, group = Abundance)) + geom_bar(stat = 'identity') + 
+   theme_bw(base_size =28)+ 
+   theme(legend.position = "bottom",legend.text = element_text(face = "italic")) +
+   scale_fill_manual(values = Rainbow2) +xlab("Age and Health Status") +ylab("Relative Abundance %")+
+  scale_y_continuous(labels = c("0","25","50","75","100"))+
+   facet_wrap(BPtest2$Status, labeller = as_labeller(c("CF" = "CF","HC" = "Control")),ncol = 2 )
 dev.off()
 
 ```
@@ -1148,7 +1196,7 @@ for (j in levels(CFsamp$TimePeriod)){
 pancPerc <- vector()
 for (j in levels(CFsamp$TimePeriod)){
   temp <- length(CFsamp$PancIns[CFsamp$TimePeriod == j & CFsamp$PancIns== "Yes"])/length(CFsamp$PancIns[CFsamp$TimePeriod == j])
-  DelPerc <- c(pancPerc,temp)
+  pancPerc <- c(pancPerc,temp)
 }
 
 ```
